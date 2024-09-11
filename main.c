@@ -45,15 +45,12 @@ void mapearLabels(FILE *entrada) {
     int opcode, argumento1, argumento2;
     int contador_programa = 0;
     int encontrado_stop = 0;
-
     while (fscanf(entrada, "%d", &opcode) != EOF) {
         if (encontrado_stop) {
             if (opcode == 0) {
-                // Se após STOP, o opcode for 0, é um SPACE
                 adicionarLabel(contador_programa);
                 contador_programa++;
             } else {
-                // Se após STOP, o opcode não for 0, é uma constante
                 adicionarLabel(contador_programa);
                 contador_programa++;
             }
@@ -92,19 +89,15 @@ void mapearLabels(FILE *entrada) {
             }
         }
     }
-
     rewind(entrada);
 }
 
 int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrada) {
     int argumento1, argumento2;
-
-    // Checa se há uma label para o endereço atual do contador de programa
     int index = buscarEnderecoLabel(*contador_programa);
     if (index != -1) {
         fprintf(saida, "%s:\n", labels[index].label);
     }
-
     switch (opcode) {
         case ADD:
             fscanf(entrada, "%d", &argumento1);
@@ -179,6 +172,9 @@ int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrad
             break;
         case STOP:
             fprintf(saida, "    hlt\n");
+            fprintf(saida, "    mov eax, 1\n");
+            fprintf(saida, "    xor ebx, ebx\n");
+            fprintf(saida, "    int 0x80\n" );
             (*contador_programa) += 1;
             return 1;
         default:
@@ -186,46 +182,38 @@ int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrad
             (*contador_programa) += 1;
             break;
     }
-
     return 0;
 }
 
 void adicionarSectionData(FILE *saida) {
     fprintf(saida, "section .data\n");
-    fprintf(saida, "    buffer db 0  ; Buffer para entrada/saída\n");
+    fprintf(saida, "    buffer db 100  ; Buffer para entrada/saída\n");
 }
 
 void adicionarSectionBss(FILE *saida) {
     fprintf(saida, "section .bss\n");
 }
-
+  
 void alocar_memoria(int opcode, FILE *saida, int *contador_programa, FILE *entrada) {
     int index;
-
     if (!bss){
         adicionarSectionBss(saida);
         bss = 1;
     }
-    
-
-    // Aloca memória com base no opcode
     switch (opcode) {
         case SPACE:
             index = buscarEnderecoLabel(*contador_programa);
             if (index != -1) {
-                fprintf(saida, "    %s resb 8\n", labels[index].label);
+                fprintf(saida, "    %s resd 4\n", labels[index].label);
             }
             (*contador_programa) += 1;
             break;
-
         default:
-            // Para constantes, aloca memória na seção .data para memória inicializada
             index = buscarEnderecoLabel(*contador_programa);
             if (index != -1) {
                 strcpy(constantes[const_count].label, labels[index].label);
                 constantes[const_count].opcode = opcode;
-            }
-             
+            } 
             (*contador_programa) += 1;
             const_count++;
             break;
@@ -233,7 +221,6 @@ void alocar_memoria(int opcode, FILE *saida, int *contador_programa, FILE *entra
 }
 
 void adicionarSectionText(FILE *saida) {
-
     fprintf(saida, "section .text\n");
     fprintf(saida, "    global _start\n");
     fprintf(saida, "_start:\n");
@@ -283,42 +270,34 @@ void adicionarFuncoes(FILE *saida) {
 }
 
 void substituirExtensao(char *nome_arquivo, const char *nova_extensao, char *nome_arquivo_com_nova_extensao) {
-    char *ponto = strrchr(nome_arquivo, '.'); // Encontra o último ponto na string
+    char *ponto = strrchr(nome_arquivo, '.');
     if (ponto != NULL) {
-        *ponto = '\0'; // Remove a extensão antiga
+        *ponto = '\0';
     }
-    snprintf(nome_arquivo_com_nova_extensao, 256, "%s%s", nome_arquivo, nova_extensao); // Adiciona a nova extensão
+    snprintf(nome_arquivo_com_nova_extensao, 256, "%s%s", nome_arquivo, nova_extensao);
 }
 
 int main(int argc, char *argv[]) {
-
     if (argc < 2) {
         printf("Uso: %s <arquivo de entrada>\n", argv[0]);
         return 1;
     }
-
     FILE *entrada = fopen(argv[1], "r");
     if (entrada == NULL) {
         perror("Erro ao abrir o arquivo de entrada");
         return 1;
     }
-
-    // Mapeia os labels antes de traduzir
     mapearLabels(entrada);
     substituirExtensao(argv[1], ".s", nome_arquivo_saida);
-
     FILE *saida = fopen(nome_arquivo_saida, "w");
     if (saida == NULL) {
         perror("Erro ao abrir o arquivo de saída");
         fclose(entrada);
         return 1;
     }
-
     adicionarSectionText(saida);
-
     int opcode;
     int contador_programa = 0;
-
     while (fscanf(entrada, "%d", &opcode) != EOF) {
         if (!stop_found) {
             stop_found = traduzirOpcode(opcode, saida, &contador_programa, entrada);
@@ -328,13 +307,10 @@ int main(int argc, char *argv[]) {
                 adicionarFuncoes(saida);
                 functions = 1;                
             }
-            
             alocar_memoria(opcode, saida, &contador_programa, entrada);
         }
     }
-
     adicionarSectionData(saida);
-
     for (int i = 0; i < const_count; i++){
         fprintf(saida, "    %s dd %d\n", constantes[i].label, constantes[i].opcode);
 
