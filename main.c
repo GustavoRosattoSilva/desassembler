@@ -1,85 +1,350 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include "const.h"
 
-void traduzirOpcode(int opcode, FILE *saida) {
-    switch(opcode) {
-        case 0: // SPACE
-            fprintf(saida, "; Espaço reservado\n");
+typedef struct {
+    int endereco;
+    char label[20];
+} Label;
+
+typedef struct {
+    char label[20];
+    int opcode;
+} Const;
+
+Label labels[MAX_MEMORIA];
+Const constantes[MAX_MEMORIA];
+char nome_arquivo_saida[MAX_CAMINHO];
+int const_count = 0;
+int label_count = 0;
+int stop_found = 0;
+int functions = 0;
+int bss = 0;
+int data = 0;  
+ 
+
+void adicionarLabel(int endereco) {
+    if (label_count < MAX_MEMORIA) {
+        snprintf(labels[label_count].label, sizeof(labels[label_count].label), "label_%d", endereco);
+        labels[label_count].endereco = endereco;
+        label_count++;
+    }
+}
+
+int buscarEnderecoLabel(int endereco) {
+    for (int i = 0; i < label_count; i++) {
+        if (labels[i].endereco == endereco) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void mapearLabels(FILE *entrada) {
+    int opcode, argumento1, argumento2;
+    int contador_programa = 0;
+    int encontrado_stop = 0;
+
+    while (fscanf(entrada, "%d", &opcode) != EOF) {
+        if (encontrado_stop) {
+            if (opcode == 0) {
+                // Se após STOP, o opcode for 0, é um SPACE
+                adicionarLabel(contador_programa);
+                contador_programa++;
+            } else {
+                // Se após STOP, o opcode não for 0, é uma constante
+                adicionarLabel(contador_programa);
+                contador_programa++;
+            }
+        } else {
+            switch (opcode) {
+                case SPACE:
+                case STOP:
+                    contador_programa += 1;
+                    encontrado_stop = 1;
+                    break;
+                case ADD:
+                case SUB:
+                case MUL:
+                case DIV:
+                case JMP:
+                case JMPN:
+                case JMPP:
+                case JMPZ:
+                case LOAD:
+                case STORE:
+                case INPUT:
+                case OUTPUT:
+                    fscanf(entrada, "%d", &argumento1);
+                    if (opcode >= JMP && opcode <= JMPZ) {
+                        adicionarLabel(argumento1);
+                    }
+                    contador_programa += 2;
+                    break;
+                case COPY:
+                    fscanf(entrada, "%d %d", &argumento1, &argumento2);
+                    contador_programa += 3;
+                    break;
+                default:
+                    contador_programa += 1;
+                    break;
+            }
+        }
+    }
+
+    rewind(entrada);
+}
+
+int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrada) {
+    int argumento1, argumento2;
+
+    // Checa se há uma label para o endereço atual do contador de programa
+    int index = buscarEnderecoLabel(*contador_programa);
+    if (index != -1) {
+        fprintf(saida, "%s:\n", labels[index].label);
+    }
+
+    switch (opcode) {
+        case ADD:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    add eax, DWORD [label_%d]\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 1: // ADD
-            fprintf(saida, "ADD EAX, [mem]\n");
+        case SUB:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    sub eax, DWORD [label_%d]\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 2: // SUB
-            fprintf(saida, "SUB EAX, [mem]\n");
+        case MUL:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    mov ebx, DWORD [label_%d]\n", argumento1);
+            fprintf(saida, "    imul eax, ebx\n");
+            fprintf(saida, "    jo overflow\n");
+            (*contador_programa) += 2;
             break;
-        case 3: // MUL
-            fprintf(saida, "IMUL EAX, [mem]\n");
-            // Adiciona a lógica para verificar overflow
+        case DIV:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    mov ebx, DWORD [label_%d]\n", argumento1);
+            fprintf(saida, "    cdq\n");
+            fprintf(saida, "    idiv ebx\n");
+            fprintf(saida, "    jo overflow\n");
+            (*contador_programa) += 2;
             break;
-        case 4: // DIV
-            fprintf(saida, "IDIV [mem]\n");
+        case JMP:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    jmp SHORT label_%d\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 5: // JMP
-            fprintf(saida, "JMP label\n"); //  arrumar para  substituir "label"  pelo o registradore 
+        case JMPN:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    jl SHORT label_%d\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 6: // JMPN (Jump if Negative)
-            fprintf(saida, "JL label\n");
+        case JMPP:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    jg SHORT label_%d\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 7: // JMPP (Jump if Positive)
-            fprintf(saida, "JG label\n");
+        case JMPZ:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    je SHORT label_%d\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 8: // JMPZ (Jump if Zero)
-            fprintf(saida, "JE label\n");
+        case COPY:
+            fscanf(entrada, "%d %d", &argumento1, &argumento2);
+            fprintf(saida, "    mov eax, DWORD [label_%d]\n", argumento1);
+            fprintf(saida, "    mov DWORD [label_%d], eax\n", argumento2);
+            (*contador_programa) += 3;
             break;
-        case 9: // COPY
-            fprintf(saida, "MOV [dest], [src]\n"); // arrumar "dest" e "src" para receber os registradores
+        case LOAD:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    mov eax, DWORD [label_%d]\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 10: // LOAD
-            fprintf(saida, "MOV EAX, [mem]\n");
+        case STORE:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    mov DWORD [label_%d], eax\n", argumento1);
+            (*contador_programa) += 2;
             break;
-        case 11: // STORE
-            fprintf(saida, "MOV [mem], EAX\n");
+        case INPUT:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    call INPUT\n");
+            (*contador_programa) += 2;
             break;
-        case 12: // INPUT
-            fprintf(saida, "CALL read_input\n");
+        case OUTPUT:
+            fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    call OUTPUT\n");
+            (*contador_programa) += 2;
             break;
-        case 13: // OUTPUT
-            fprintf(saida, "CALL write_output\n");
-            break;
-        case 14: // STOP
-            fprintf(saida, "HLT\n");
-            break;
+        case STOP:
+            fprintf(saida, "    hlt\n");
+            (*contador_programa) += 1;
+            return 1;
         default:
-            fprintf(saida, "; Opcode %d não reconhecido\n", opcode);
+            fprintf(saida, "    ; Opcode %d não reconhecido\n", opcode);
+            (*contador_programa) += 1;
+            break;
+    }
+
+    return 0;
+}
+
+void adicionarSectionData(FILE *saida) {
+    fprintf(saida, "section .data\n");
+    fprintf(saida, "    buffer db 0  ; Buffer para entrada/saída\n");
+}
+
+void adicionarSectionBss(FILE *saida) {
+    fprintf(saida, "section .bss\n");
+}
+
+void alocar_memoria(int opcode, FILE *saida, int *contador_programa, FILE *entrada) {
+    int index;
+
+    if (!bss){
+        adicionarSectionBss(saida);
+        bss = 1;
+    }
+    
+
+    // Aloca memória com base no opcode
+    switch (opcode) {
+        case SPACE:
+            index = buscarEnderecoLabel(*contador_programa);
+            if (index != -1) {
+                fprintf(saida, "    %s resb 8\n", labels[index].label);
+            }
+            (*contador_programa) += 1;
+            break;
+
+        default:
+            // Para constantes, aloca memória na seção .data para memória inicializada
+            index = buscarEnderecoLabel(*contador_programa);
+            if (index != -1) {
+                strcpy(constantes[const_count].label, labels[index].label);
+                constantes[const_count].opcode = opcode;
+            }
+             
+            (*contador_programa) += 1;
+            const_count++;
             break;
     }
 }
 
-int main() {
-    FILE *entrada, *saida;
-    int opcode;
+void adicionarSectionText(FILE *saida) {
 
-    entrada = fopen("myfile.obj", "r");
+    fprintf(saida, "section .text\n");
+    fprintf(saida, "    global _start\n");
+    fprintf(saida, "_start:\n");
+}
+
+void adicionarFuncoes(FILE *saida) {
+    fprintf(saida, "overflow:\n");
+    fprintf(saida, "    ; Código para tratamento de overflow\n");
+    fprintf(saida, "    mov eax, 1\n");
+    fprintf(saida, "    int 0x80\n");
+    
+    fprintf(saida, "INPUT:\n");
+    fprintf(saida, "    push ebp\n");
+    fprintf(saida, "    mov ebp, esp\n");
+    fprintf(saida, "    push ebx\n");
+    fprintf(saida, "    push ecx\n");
+    fprintf(saida, "    push edx\n");
+    fprintf(saida, "    mov eax, 3\n");
+    fprintf(saida, "    mov ebx, 0\n");
+    fprintf(saida, "    mov ecx, buffer\n");
+    fprintf(saida, "    mov edx, 100\n");
+    fprintf(saida, "    int 0x80\n");
+    fprintf(saida, "    pop edx\n");
+    fprintf(saida, "    pop ecx\n");
+    fprintf(saida, "    pop ebx\n");
+    fprintf(saida, "    mov esp, ebp\n");
+    fprintf(saida, "    pop ebp\n");
+    fprintf(saida, "    ret\n");
+
+    fprintf(saida, "OUTPUT:\n");
+    fprintf(saida, "    push ebp\n");
+    fprintf(saida, "    mov ebp, esp\n");
+    fprintf(saida, "    push ebx\n");
+    fprintf(saida, "    push ecx\n");
+    fprintf(saida, "    push edx\n");
+    fprintf(saida, "    mov eax, 4\n");
+    fprintf(saida, "    mov ebx, 1\n");
+    fprintf(saida, "    mov ecx, buffer\n");
+    fprintf(saida, "    mov edx, 100\n");
+    fprintf(saida, "    int 0x80\n");
+    fprintf(saida, "    pop edx\n");
+    fprintf(saida, "    pop ecx\n");
+    fprintf(saida, "    pop ebx\n");
+    fprintf(saida, "    mov esp, ebp\n");
+    fprintf(saida, "    pop ebp\n");
+    fprintf(saida, "    ret\n");
+}
+
+void substituirExtensao(char *nome_arquivo, const char *nova_extensao, char *nome_arquivo_com_nova_extensao) {
+    char *ponto = strrchr(nome_arquivo, '.'); // Encontra o último ponto na string
+    if (ponto != NULL) {
+        *ponto = '\0'; // Remove a extensão antiga
+    }
+    snprintf(nome_arquivo_com_nova_extensao, 256, "%s%s", nome_arquivo, nova_extensao); // Adiciona a nova extensão
+}
+
+int main(int argc, char *argv[]) {
+
+    if (argc < 2) {
+        printf("Uso: %s <arquivo de entrada>\n", argv[0]);
+        return 1;
+    }
+
+    FILE *entrada = fopen(argv[1], "r");
     if (entrada == NULL) {
         perror("Erro ao abrir o arquivo de entrada");
         return 1;
     }
 
-    saida = fopen("myfile.s", "w");
+    // Mapeia os labels antes de traduzir
+    mapearLabels(entrada);
+    substituirExtensao(argv[1], ".s", nome_arquivo_saida);
+
+    FILE *saida = fopen(nome_arquivo_saida, "w");
     if (saida == NULL) {
-        perror("Erro ao criar o arquivo de saída");
+        perror("Erro ao abrir o arquivo de saída");
         fclose(entrada);
         return 1;
     }
 
+    adicionarSectionText(saida);
+
+    int opcode;
+    int contador_programa = 0;
+
     while (fscanf(entrada, "%d", &opcode) != EOF) {
-        traduzirOpcode(opcode, saida);
+        if (!stop_found) {
+            stop_found = traduzirOpcode(opcode, saida, &contador_programa, entrada);
+        } 
+        else {
+            if (!functions){
+                adicionarFuncoes(saida);
+                functions = 1;                
+            }
+            
+            alocar_memoria(opcode, saida, &contador_programa, entrada);
+        }
     }
 
+    adicionarSectionData(saida);
+
+    for (int i = 0; i < const_count; i++){
+        fprintf(saida, "    %s dd %d\n", constantes[i].label, constantes[i].opcode);
+
+
+    }
+    
+
+    
     fclose(entrada);
     fclose(saida);
 
-    printf("Tradução concluída. Saída salva em myfile.s\n");
     return 0;
 }
-
