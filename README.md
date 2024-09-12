@@ -17,4 +17,17 @@ O sistema operacional utilizado para o seu desenvolvimento foi o Linux Mint 21.3
 O código foi compilado utilizando o GCC (GNU Compiler Collection). Para compilar o projeto, utilize o seguinte comando:
 
 ```bash
-gcc -Wall main.c const.h -o
+gcc -Wall main.c -o tradutor
+```
+
+ou
+
+```bash
+make
+```
+
+Para executar informar um arquivo do tipo .obj como entrada
+
+```bash
+./tradutor <myfile>.obj
+```
