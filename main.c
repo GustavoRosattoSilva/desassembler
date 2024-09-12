@@ -170,15 +170,24 @@ int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrad
         case INPUT:
             fscanf(entrada, "%d", &argumento1);
             fprintf(saida, "    call INPUT\n");
+            fprintf(saida, "    call STR_TO_INT\n");
+            fprintf(saida, "    mov eax, [number]\n");
+            fprintf(saida, "    mov DWORD [label_%d], eax\n", argumento1);
             (*contador_programa) += 2;
             break;
         case OUTPUT:
             fscanf(entrada, "%d", &argumento1);
+            fprintf(saida, "    mov eax, [label_%d]\n", argumento1);
+            // fprintf(saida, "    mov [number], eax\n");
+            fprintf(saida, "    call INT_TO_STR\n");
             fprintf(saida, "    call OUTPUT\n");
+            fprintf(saida, "    call PRINT_NEWLINE\n");
             (*contador_programa) += 2;
             break;
         case STOP:
-            fprintf(saida, "    hlt\n");
+            fprintf(saida, "    mov eax, 1\n");
+            fprintf(saida, "    mov ebx, 0\n");
+            fprintf(saida, "    int 0x80\n");
             (*contador_programa) += 1;
             return 1;
         default:
@@ -192,11 +201,13 @@ int traduzirOpcode(int opcode, FILE *saida, int *contador_programa, FILE *entrad
 
 void adicionarSectionData(FILE *saida) {
     fprintf(saida, "section .data\n");
-    fprintf(saida, "    buffer db 0  ; Buffer para entrada/saída\n");
+    fprintf(saida, "    newline db 10\n");
 }
 
 void adicionarSectionBss(FILE *saida) {
     fprintf(saida, "section .bss\n");
+    fprintf(saida, "    buffer resb 10\n");
+    fprintf(saida, "    number resd 1\n");
 }
 
 void alocar_memoria(int opcode, FILE *saida, int *contador_programa, FILE *entrada) {
@@ -213,7 +224,7 @@ void alocar_memoria(int opcode, FILE *saida, int *contador_programa, FILE *entra
         case SPACE:
             index = buscarEnderecoLabel(*contador_programa);
             if (index != -1) {
-                fprintf(saida, "    %s resb 8\n", labels[index].label);
+                fprintf(saida, "    %s resd 1\n", labels[index].label);
             }
             (*contador_programa) += 1;
             break;
@@ -243,22 +254,27 @@ void adicionarFuncoes(FILE *saida) {
     fprintf(saida, "overflow:\n");
     fprintf(saida, "    ; Código para tratamento de overflow\n");
     fprintf(saida, "    mov eax, 1\n");
+    fprintf(saida, "    mov ebx, 1\n");
     fprintf(saida, "    int 0x80\n");
     
     fprintf(saida, "INPUT:\n");
     fprintf(saida, "    push ebp\n");
     fprintf(saida, "    mov ebp, esp\n");
+    fprintf(saida, "    push eax\n");
     fprintf(saida, "    push ebx\n");
     fprintf(saida, "    push ecx\n");
     fprintf(saida, "    push edx\n");
     fprintf(saida, "    mov eax, 3\n");
     fprintf(saida, "    mov ebx, 0\n");
     fprintf(saida, "    mov ecx, buffer\n");
-    fprintf(saida, "    mov edx, 100\n");
+    fprintf(saida, "    mov edx, 10\n");
     fprintf(saida, "    int 0x80\n");
+    // remover
+    // fprintf(saida, "    mov byte [ecx + eax - 1], 0\n");
     fprintf(saida, "    pop edx\n");
     fprintf(saida, "    pop ecx\n");
     fprintf(saida, "    pop ebx\n");
+    fprintf(saida, "    pop eax\n");
     fprintf(saida, "    mov esp, ebp\n");
     fprintf(saida, "    pop ebp\n");
     fprintf(saida, "    ret\n");
@@ -266,19 +282,65 @@ void adicionarFuncoes(FILE *saida) {
     fprintf(saida, "OUTPUT:\n");
     fprintf(saida, "    push ebp\n");
     fprintf(saida, "    mov ebp, esp\n");
+    fprintf(saida, "    push eax\n");
     fprintf(saida, "    push ebx\n");
     fprintf(saida, "    push ecx\n");
     fprintf(saida, "    push edx\n");
     fprintf(saida, "    mov eax, 4\n");
     fprintf(saida, "    mov ebx, 1\n");
     fprintf(saida, "    mov ecx, buffer\n");
-    fprintf(saida, "    mov edx, 100\n");
+    fprintf(saida, "    mov edx, 10\n");
     fprintf(saida, "    int 0x80\n");
     fprintf(saida, "    pop edx\n");
     fprintf(saida, "    pop ecx\n");
     fprintf(saida, "    pop ebx\n");
+    fprintf(saida, "    pop eax\n");
     fprintf(saida, "    mov esp, ebp\n");
     fprintf(saida, "    pop ebp\n");
+    fprintf(saida, "    ret\n");
+
+    fprintf(saida, "STR_TO_INT:\n");
+    fprintf(saida, "    mov eax, 0\n");
+    fprintf(saida, "    mov ecx, 0\n");
+    
+    fprintf(saida, "convert_loop:\n");
+    fprintf(saida, "    mov bl, [buffer + ecx]\n");
+    fprintf(saida, "    cmp bl, 10\n");
+    fprintf(saida, "    je done_conversion\n");
+    
+    fprintf(saida, "    sub bl, '0'\n");
+    fprintf(saida, "    imul eax, eax, 10\n");
+    fprintf(saida, "    add eax, ebx\n");
+    
+    fprintf(saida, "    inc ecx\n");
+    fprintf(saida, "    jmp convert_loop\n");
+    
+    fprintf(saida, "done_conversion:\n");
+    fprintf(saida, "    mov [number], eax\n");
+    fprintf(saida, "    ret\n");
+
+    fprintf(saida, "INT_TO_STR:\n");
+    fprintf(saida, "    mov ebx, 10\n");
+    fprintf(saida, "    mov ecx, buffer + 9\n");
+    fprintf(saida, "    mov byte [ecx], 0\n");
+
+    fprintf(saida, "convert_to_str_loop:\n");
+    fprintf(saida, "    xor edx, edx\n");
+    fprintf(saida, "    div ebx\n");
+    fprintf(saida, "    add dl, '0'\n");
+    fprintf(saida, "    dec ecx\n");
+    fprintf(saida, "    mov [ecx], dl\n");
+    fprintf(saida, "    test eax, eax\n");
+    fprintf(saida, "    jnz convert_to_str_loop\n");
+    // fprintf(saida, "    mov byte [ecx - 1], 0\n");
+    fprintf(saida, "    ret\n");
+
+    fprintf(saida, "PRINT_NEWLINE:\n");
+    fprintf(saida, "    mov eax, 4\n");
+    fprintf(saida, "    mov ebx, 1\n");
+    fprintf(saida, "    mov ecx, newline\n");
+    fprintf(saida, "    mov edx, 1\n");
+    fprintf(saida, "    int 0x80\n");
     fprintf(saida, "    ret\n");
 }
 
@@ -337,11 +399,7 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < const_count; i++){
         fprintf(saida, "    %s dd %d\n", constantes[i].label, constantes[i].opcode);
-
-
     }
-    
-
     
     fclose(entrada);
     fclose(saida);
